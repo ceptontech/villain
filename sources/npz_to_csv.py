@@ -1,12 +1,11 @@
-from xml.dom.expatbuilder import FragmentBuilder
 import numpy as np
 
 
-FRAME_PREFIX = "C:\\Users\Michael\\repos\\data\\set1\\raw\\frame_"
+# FRAME_PREFIX = "C:\\Users\Michael\\repos\\data\\set1\\raw\\frame_"
+FRAME_PREFIX = "..\\npz\\bkg_"
 IN_TYPE = ".npz"
 OUT_TYPE = ".csv"
-NUM_FILES = 5693
-
+NUM_FILES = 1
 def main():
     for i in range(NUM_FILES):
         frame_file = np.load(FRAME_PREFIX + str(i) + IN_TYPE)
@@ -17,7 +16,7 @@ def main():
             labs.append(elem)
             temp.append(frame_file[elem])
             mat =  np.stack(temp).T
-        np.savetxt("../data/frame_" + str(i) + ".csv", mat, delimiter=",",newline="\n")
+        np.savetxt("../data/bkg_" + str(i) + ".csv", mat, header=str(labs), delimiter=",",newline="\n")
         frame_file.close()
         if i % 100 == 0:
             print(i)
