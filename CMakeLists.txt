@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0)
-project(raylib-viewer LANGUAGES CXX C)
+project(villain LANGUAGES CXX C)
 set(CMAKE_C_STANDARD 99)
 
 include(FetchContent)
