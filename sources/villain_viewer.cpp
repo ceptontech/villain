@@ -2,7 +2,7 @@
  * @file villain-viewer.cpp
  * @author Michael J Vernau (michael.vernau@cepton.com)
  * @brief 
- * @version 0.3
+ * @version 0.4
  * @date 2022-09-21
  * 
  */
@@ -21,13 +21,13 @@
 #define NUM_CLUSTER_COLORS 15
 //file params
 #define FRAME_PATH "../data/frame_"
-#define BKG_FILE_LOCATION "../data/bkg_0.csv"
+#define BKG_FILE_LOCATION "../data/bkg.csv"
 #define TRACKING_FILE_LOCATION "../npz/tracking.csv"
 //point data params
 #define NUM_FRAMES 500
 #define BKG_THRESHOLD 0.5
 #define EXPECTED_POINTS_PER_FRAME 60000
-#define DPP 3 //datapoints per point(x,y,z)
+#define DPP 10 //datapoints per point(x,y,z)
 //voxel params
 #define X_DIM 310
 #define Y_DIM 510
@@ -51,6 +51,15 @@
 int flattened(int x, int y, int z){
     return x + (y * Y_DIM) + (z * X_DIM * Y_DIM);
 }
+void unbox(std::vector<float>& ptdata){
+    ptdata[0] *= dx;
+    ptdata[0] += dx/2.0f;
+    ptdata[1] *= dy;
+    ptdata[1] += dy/2.0f;
+    ptdata[2] *= dz;
+    ptdata[2] += dz/2.0f;
+}
+
 /**
  * @brief assigns a 1d bin from a 3d coordinate 
  * 
@@ -70,160 +79,100 @@ int vox_assignment(float x, float y, float z){
 int main()
 {
     std::string delim = ",";
-    std::cout << "[info] starting cluster loading\n";
-    std::fstream tk_file;
-    tk_file.open(TRACKING_FILE_LOCATION);
-    std::vector<std::vector<std::vector<float>>> clusters;
-    clusters.reserve(NUM_FRAMES);
-    if(tk_file.is_open()){
-        std::string s;
-        std::getline(tk_file, s);
-        int curr_frame = 1;
-        std::vector<std::vector<float>> frame;
-        frame.reserve(MAX_CLUSTERS);
-        while(std::getline(tk_file, s)){
-            std::vector<float> cluster;
-            cluster.reserve(CLUSTER_FIELDS);
-            auto start = 0U;
-            auto end = s.find(delim);
-            int place_idx = 0;
-            int row_idx = 0;
-            float clstr_data[CLUSTER_FIELDS];
-            while(end != std::string::npos){
-                cluster.push_back(stof(s.substr(start, end - start)));
-                start = end + delim.length();
-                end = s.find(delim, start);
-            } 
-            if((int)cluster[0] > curr_frame){
-                clusters.push_back(frame);
-                frame = std::vector<std::vector<float>>();
-                frame.reserve(MAX_CLUSTERS);
-                curr_frame++;
-            }
-            frame.push_back(cluster);
-        }
-    }
-    std::cout << "[info] cluster array loaded\n";
-    std::cout.flush();
-    tk_file.close();
-    std::unordered_map<int, float> bkg_probs;
+    std::cout << "[INFO] bkg point load beginning\n";
+    std::vector<std::vector<float>> bkg;
     std::fstream bkg_file;
-    bkg_file.open(BKG_FILE_LOCATION, std::ios::in);
-    std::cout << "[info] starting bkg load\n";
-    if (bkg_file.is_open()){
-        std::string s;
-        while(std::getline(bkg_file, s)){
+    bkg_file.open(BKG_FILE_LOCATION);
+    if(bkg_file.is_open()){
+        std::string line;
+        std::getline(bkg_file, line);
+        while(std::getline(bkg_file, line)){
             auto start = 0U;
-            auto end = s.find(delim);
-            int bkt[3];
-            int idx = 0;
+            auto end = line.find(delim);
+            std::vector<float> bkg_point;
             while(end != std::string::npos){
-                bkt[idx] = (int)std::stof(s.substr(start, end - start));
+                bkg_point.push_back(std::stof(line.substr(start, end - start)));
                 start = end + delim.length();
-                end = s.find(delim, start);
-                idx++;
+                end = line.find(delim, start);
             }
-            float val = std::stof(s.substr(start, end));
-            if(val >= BKG_THRESHOLD){
-                bkg_probs[flattened(bkt[0], bkt[1], bkt[2])] = val;
+            bkg_point.push_back(std::stof(line.substr(start, end)));
+            if(bkg_point[3] > BKG_THRESHOLD){
+                    unbox(bkg_point);
+                    bkg.push_back(bkg_point);
             }
         }
+    }else{
+        std::cerr << "bkg file failed to open\n";
+        return 1;
     }
     bkg_file.close();
-    std::cout << "[info] bkg size is: " << bkg_probs.size() << std::endl;
-    std::cout << "[info] bkg loaded; starting frame load\n";
-    std::vector<std::vector<std::vector<float>>> frames; //frames holds all frames data
+    std::cout << "[INFO] bkg loaded " << bkg.size() << " pts\n[INFO] beginning foreground point load\n";
+    std::vector<std::vector<std::vector<float>>> frames;
     frames.reserve(NUM_FRAMES);
-    for(int i=0; i < NUM_FRAMES; i++){ // load data from csv to triple vector of ints
-        std::string frame_path = FRAME_PATH;
-        frame_path = frame_path + std::to_string(i) + std::string(".csv");
-        std::vector<std::vector<float>> pts;
-        pts.reserve(EXPECTED_POINTS_PER_FRAME);
-        std::fstream file;
-        file.open(frame_path, std::ios::in);
-        if(file.is_open()){
-            std::string s;
-            while(std::getline(file,s)){
+    std::string frame_path = std::string(FRAME_PATH);
+    for(int frame_number = 0; frame_number < NUM_FRAMES; frame_number++){
+        std::vector<std::vector<float>> frame;
+        frame.reserve(EXPECTED_POINTS_PER_FRAME);
+        std::fstream frame_file;
+        frame_file.open((frame_path + std::to_string(frame_number) + std::string(".csv")));
+        if(frame_file.is_open()){
+            std::string line;
+            std::getline(frame_file, line);
+            while(std::getline(frame_file, line)){
                 auto start = 0U;
-                auto end = s.find(delim);
+                auto end = line.find(delim);
                 std::vector<float> pt;
                 pt.reserve(DPP);
                 while(end != std::string::npos){
-                    pt.push_back(std::stof(s.substr(start, end - start)));
+                    pt.push_back(std::stof(line.substr(start, end - start)));
                     start = end + delim.length();
-                    end = s.find(delim, start);
+                    end = line.find(delim, start);
                 }
-                pt.push_back(std::stof(s.substr(start, end)));
-                pts.push_back(pt);
+                pt.push_back(std::stof(line.substr(start, end)));
+                frame.push_back(pt);
             }
+            frames.push_back(frame);
+            frame_file.close();
+        if(frame_number%100 == 0){
+            std::cout << "[INFO] frame loading " << (float)((float)frame_number/NUM_FRAMES * 100.0f) << "\% complete\n";
         }
-        frames.push_back(pts);
-        file.close();
-        if(i% 50 == 0){
-            std::cout << "[info] frame " << i << " loaded\n";
+        }else{
+            std::cout << "[WARNING] frame " << frame_number << "failed to open \n";
         }
     }
-    std::cout << "[info] frames loaded, starting visualization\n";
+    std::cout << "[INFO] frames locked and loaded\n";
     InitWindow(SCREEN_WIDTH, SCREEN_HEIGHT, WINDOW_TITLE); //start rendering window
     // Initialize the camera
     Camera3D camera = { { 10.0f, 1.4f, 0.0f }, { 16.0f, 1.4f, -16.0f }, { 0.0f, 1.0f, 0.0f }, 45.0f, 0 }; // {posistion, look posistion, axis, FOV, ???}
     SetCameraMode(camera, CAMERA_FIRST_PERSON);
-    SetTargetFPS(40);
+    SetTargetFPS(60);
     int n = 0;
-    int nq = 0;
-    while (!WindowShouldClose())
-    {
+    while(!WindowShouldClose()){
         UpdateCamera(&camera);
         BeginDrawing();
         ClearBackground(RAYWHITE);
-            BeginMode3D(camera);
-                DrawGrid(10, 5.0f);
-                for (auto& clst : clusters[n]){
-                    float x_len = clst[10] - clst[9];
-                    float y_len = clst[12] - clst[11];
-                    float z_len = clst[14] - clst[13];
-                    float x_mean = clst[10] + clst[9] / 2.0f;
-                    float y_mean = clst[12] + clst[11] / 2.0f;
-                    float z_mean = clst[14] + clst[13] / 2.0f;
-                    Vector3 cube_pos = {x_len, z_len, y_len};
-                    Color cube_color = RED;
-                    DrawCubeWires(cube_pos, x_len, z_len, y_len, cube_color);
-                }
-                for(std::vector<float> pt : frames[n]){
-                    Vector3 xyz = {pt[0], pt[2], pt[1]};
-                    Color pt_color = ColorFromHSV((float)((int)(pt[4] * 600.0)%360), 0.75f, 0.9f);
-                    if((bkg_probs.find(vox_assignment(pt[0], pt[1], pt[2])) != bkg_probs.end()) || (pt[2] < 0.05)){
-                        pt_color = GRAY;
-                        DrawPoint3D(xyz, pt_color);
-                    }else{
-                        bool drawn = false;
-                        for(auto& clst : clusters[n]){
-                            if((pt[0] > clst[9])&(pt[0] < clst[10])&&(pt[1] > clst[11])&(pt[1] < clst[12])&&(pt[2] > clst[13])&(pt[2] < clst[14])){
-                                pt_color = ColorFromHSV((float)((int)clst[1]%NUM_CLUSTER_COLORS)/NUM_CLUSTER_COLORS * 360.0f, 0.75f, 0.9f);
-                                DrawPoint3D(xyz, pt_color);
-                                drawn = true;
-                            }
-                        }
-                        if(!drawn){
-                            pt_color = BLACK;
-                            DrawPoint3D(xyz, pt_color);
-                        }
-                    }
-                }
-               
-            EndMode3D();
-            DrawFPS(10, 10);
-        EndDrawing();
-        nq++;
-        nq %= 3;
-        if (nq == 0){
-            n++;
+        BeginMode3D(camera);
+        DrawGrid(10, 5.0f);
+        for(auto& bpt : bkg){
+            Vector3 bpos = {bpt[0], bpt[2], bpt[1]};
+            Color bcolor = BLACK;
+            DrawPoint3D(bpos, bcolor);
         }
+        for(auto& pt : frames[n]){
+            int sn = (int)pt[7];
+            if (sn >= 0){
+                Vector3 xyz = {pt[0], pt[2], pt[1]};
+                Color pt_color = ColorFromHSV((((float)(sn%NUM_CLUSTER_COLORS)) / NUM_CLUSTER_COLORS) * 360.0f, 0.75f, 0.9f);
+                DrawPoint3D(xyz, pt_color);
+            }
+        }
+        EndMode3D();
+        DrawFPS(10,10);
+        EndDrawing();
+        n++;
         if(n >= NUM_FRAMES){
             n = 0;
         }
-
     }
-    CloseWindow();        // Close window and OpenGL context
     return 0;
 }
